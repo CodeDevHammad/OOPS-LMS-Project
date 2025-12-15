@@ -1,0 +1,552 @@
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <vector>
+
+using namespace std;
+
+// Simplified, easy-to-read LMS implementation.
+// Functionality unchanged from previous version:
+// - users.txt       : username|password|role(admin/student/teacher)
+// - students.txt    : username|fullName|age
+// - courses.txt     : courseId|title|teacherUsername
+// - enrollments.txt : studentUsername|courseId
+//
+// This version uses plain loops and straightforward logic (no STL algorithms like remove_if or any_of)
+// so it's easier to explain during a viva. Compiles with C++14.
+
+struct UserRecord {
+    string username;
+    string password;
+    string role;
+};
+
+struct StudentProfile {
+    string username;
+    string fullName;
+    int age;
+};
+
+struct Course {
+    string id;
+    string title;
+    string teacherUsername;
+};
+
+vector<UserRecord> users;
+vector<StudentProfile> students;
+vector<Course> courses;
+vector<pair<string,string>> enrollments; // (studentUsername, courseId)
+
+const string USERS_FILE = "users.txt";
+const string STUDENTS_FILE = "students.txt";
+const string COURSES_FILE = "courses.txt";
+const string ENROLLMENTS_FILE = "enrollments.txt";
+
+// Simple split by delimiter (no stringstream) - easier to follow
+vector<string> splitLine(const string& line, char delim = '|') {
+    vector<string> parts;
+    string cur;
+    for (size_t i = 0; i < line.size(); ++i) {
+        if (line[i] == delim) {
+            parts.push_back(cur);
+            cur.clear();
+        } else {
+            cur.push_back(line[i]);
+        }
+    }
+    parts.push_back(cur);
+    return parts;
+}
+
+void ensureFileExists(const string& filename) {
+    ifstream ifs(filename.c_str());
+    if (!ifs.good()) {
+        ofstream ofs(filename.c_str());
+    }
+}
+
+void loadUsers() {
+    ensureFileExists(USERS_FILE);
+    users.clear();
+    ifstream ifs(USERS_FILE.c_str());
+    string line;
+    while (getline(ifs, line)) {
+        if (line.empty()) continue;
+        auto p = splitLine(line);
+        if (p.size() >= 3) {
+            UserRecord ur;
+            ur.username = p[0];
+            ur.password = p[1];
+            ur.role = p[2];
+            users.push_back(ur);
+        }
+    }
+}
+
+void saveUsers() {
+    ofstream ofs(USERS_FILE.c_str(), ios::trunc);
+    for (size_t i = 0; i < users.size(); ++i) {
+        ofs << users[i].username << '|' << users[i].password << '|' << users[i].role << '\n';
+    }
+}
+
+void loadStudents() {
+    ensureFileExists(STUDENTS_FILE);
+    students.clear();
+    ifstream ifs(STUDENTS_FILE.c_str());
+    string line;
+    while (getline(ifs, line)) {
+        if (line.empty()) continue;
+        auto p = splitLine(line);
+        if (p.size() >= 3) {
+            StudentProfile sp;
+            sp.username = p[0];
+            sp.fullName = p[1];
+            sp.age = 0;
+            try { sp.age = stoi(p[2]); } catch(...) { sp.age = 0; }
+            students.push_back(sp);
+        }
+    }
+}
+
+void saveStudents() {
+    ofstream ofs(STUDENTS_FILE.c_str(), ios::trunc);
+    for (size_t i = 0; i < students.size(); ++i) {
+        ofs << students[i].username << '|' << students[i].fullName << '|' << students[i].age << '\n';
+    }
+}
+
+void loadCourses() {
+    ensureFileExists(COURSES_FILE);
+    courses.clear();
+    ifstream ifs(COURSES_FILE.c_str());
+    string line;
+    while (getline(ifs, line)) {
+        if (line.empty()) continue;
+        auto p = splitLine(line);
+        if (p.size() >= 3) {
+            Course c;
+            c.id = p[0];
+            c.title = p[1];
+            c.teacherUsername = p[2];
+            courses.push_back(c);
+        }
+    }
+}
+
+void saveCourses() {
+    ofstream ofs(COURSES_FILE.c_str(), ios::trunc);
+    for (size_t i = 0; i < courses.size(); ++i) {
+        ofs << courses[i].id << '|' << courses[i].title << '|' << courses[i].teacherUsername << '\n';
+    }
+}
+
+void loadEnrollments() {
+    ensureFileExists(ENROLLMENTS_FILE);
+    enrollments.clear();
+    ifstream ifs(ENROLLMENTS_FILE.c_str());
+    string line;
+    while (getline(ifs, line)) {
+        if (line.empty()) continue;
+        auto p = splitLine(line);
+        if (p.size() >= 2) {
+            enrollments.push_back(make_pair(p[0], p[1]));
+        }
+    }
+}
+
+void saveEnrollments() {
+    ofstream ofs(ENROLLMENTS_FILE.c_str(), ios::trunc);
+    for (size_t i = 0; i < enrollments.size(); ++i) {
+        ofs << enrollments[i].first << '|' << enrollments[i].second << '\n';
+    }
+}
+
+// Basic helpers using simple loops (easy to explain)
+bool usernameExists(const string& uname) {
+    for (size_t i = 0; i < users.size(); ++i) {
+        if (users[i].username == uname) return true;
+    }
+    return false;
+}
+
+UserRecord* findUser(const string& uname) {
+    for (size_t i = 0; i < users.size(); ++i) {
+        if (users[i].username == uname) return &users[i];
+    }
+    return nullptr;
+}
+
+StudentProfile* findStudentProfile(const string& uname) {
+    for (size_t i = 0; i < students.size(); ++i) {
+        if (students[i].username == uname) return &students[i];
+    }
+    return nullptr;
+}
+
+Course* findCourse(const string& cid) {
+    for (size_t i = 0; i < courses.size(); ++i) {
+        if (courses[i].id == cid) return &courses[i];
+    }
+    return nullptr;
+}
+
+vector<string> getStudentEnrollments(const string& studentUsername) {
+    vector<string> out;
+    for (size_t i = 0; i < enrollments.size(); ++i) {
+        if (enrollments[i].first == studentUsername) out.push_back(enrollments[i].second);
+    }
+    return out;
+}
+
+// Admin functions (kept behavior exactly the same, but written with simple loops)
+void adminCreateUser() {
+    string uname, pwd, role;
+    cout << "Enter new username: ";
+    getline(cin, uname);
+    if (uname.empty()) { cout << "Username cannot be empty.\n"; return; }
+    if (usernameExists(uname)) { cout << "Username already exists.\n"; return; }
+    cout << "Enter password: ";
+    getline(cin, pwd);
+    cout << "Enter role (admin/student/teacher): ";
+    getline(cin, role);
+    if (role != "admin" && role != "student" && role != "teacher") {
+        cout << "Invalid role.\n"; return;
+    }
+    UserRecord ur;
+    ur.username = uname;
+    ur.password = pwd;
+    ur.role = role;
+    users.push_back(ur);
+
+    if (role == "student") {
+        StudentProfile sp;
+        string ageStr;
+        sp.username = uname;
+        cout << "Enter student full name: ";
+        getline(cin, sp.fullName);
+        cout << "Enter student age: ";
+        getline(cin, ageStr);
+        try { sp.age = stoi(ageStr); } catch(...) { sp.age = 0; }
+        students.push_back(sp);
+    }
+
+    saveUsers();
+    saveStudents();
+    cout << "User created.\n";
+}
+
+void adminDeleteUser() {
+    string uname;
+    cout << "Username to delete: ";
+    getline(cin, uname);
+    bool found = false;
+    // remove from users
+    for (size_t i = 0; i < users.size(); ) {
+        if (users[i].username == uname) {
+            users.erase(users.begin() + i);
+            found = true;
+        } else {
+            ++i;
+        }
+    }
+    if (!found) { cout << "User not found.\n"; return; }
+
+    // remove student profile
+    for (size_t i = 0; i < students.size(); ) {
+        if (students[i].username == uname) students.erase(students.begin() + i);
+        else ++i;
+    }
+
+    // remove enrollments where student == uname
+    for (size_t i = 0; i < enrollments.size(); ) {
+        if (enrollments[i].first == uname) enrollments.erase(enrollments.begin() + i);
+        else ++i;
+    }
+
+    // unassign teacher from courses
+    for (size_t i = 0; i < courses.size(); ++i) {
+        if (courses[i].teacherUsername == uname) courses[i].teacherUsername.clear();
+    }
+
+    saveUsers();
+    saveStudents();
+    saveEnrollments();
+    saveCourses();
+    cout << "User and related records removed (if existed).\n";
+}
+
+void adminAddCourse() {
+    string cid, title, teacher;
+    cout << "Course ID: ";
+    getline(cin, cid);
+    if (cid.empty()) { cout << "Course ID cannot be empty.\n"; return; }
+    if (findCourse(cid)) { cout << "Course ID already exists.\n"; return; }
+    cout << "Course title: ";
+    getline(cin, title);
+    cout << "Assign teacher username (leave blank to assign later): ";
+    getline(cin, teacher);
+    if (!teacher.empty() && !usernameExists(teacher)) {
+        cout << "Teacher username does not exist. Course will be created without teacher.\n";
+        teacher.clear();
+    }
+    Course c;
+    c.id = cid; c.title = title; c.teacherUsername = teacher;
+    courses.push_back(c);
+    saveCourses();
+    cout << "Course added.\n";
+}
+
+void adminRemoveCourse() {
+    string cid;
+    cout << "Course ID to remove: ";
+    getline(cin, cid);
+    bool found = false;
+    for (size_t i = 0; i < courses.size(); ) {
+        if (courses[i].id == cid) { courses.erase(courses.begin() + i); found = true; }
+        else ++i;
+    }
+    if (!found) { cout << "Course not found.\n"; return; }
+
+    for (size_t i = 0; i < enrollments.size(); ) {
+        if (enrollments[i].second == cid) enrollments.erase(enrollments.begin() + i);
+        else ++i;
+    }
+
+    saveCourses();
+    saveEnrollments();
+    cout << "Course removed and related enrollments deleted.\n";
+}
+
+void adminAssignTeacher() {
+    string cid, teacher;
+    cout << "Course ID: ";
+    getline(cin, cid);
+    Course* c = findCourse(cid);
+    if (!c) { cout << "Course not found.\n"; return; }
+    cout << "Teacher username to assign (leave blank to unassign): ";
+    getline(cin, teacher);
+    if (!teacher.empty() && !usernameExists(teacher)) { cout << "Teacher username does not exist.\n"; return; }
+    c->teacherUsername = teacher;
+    saveCourses();
+    cout << "Assignment updated.\n";
+}
+
+void adminViewAll() {
+    cout << "\n--- Users ---\n";
+    for (size_t i = 0; i < users.size(); ++i) cout << users[i].username << " (" << users[i].role << ")\n";
+    cout << "\n--- Students ---\n";
+    for (size_t i = 0; i < students.size(); ++i) cout << students[i].username << " - " << students[i].fullName << " - age " << students[i].age << '\n';
+    cout << "\n--- Courses ---\n";
+    for (size_t i = 0; i < courses.size(); ++i) {
+        cout << courses[i].id << " | " << courses[i].title << " | teacher: " << (courses[i].teacherUsername.empty() ? "(none)" : courses[i].teacherUsername) << '\n';
+    }
+    cout << "\n--- Enrollments ---\n";
+    for (size_t i = 0; i < enrollments.size(); ++i) cout << enrollments[i].first << " -> " << enrollments[i].second << '\n';
+    cout << '\n';
+}
+
+// Student operations
+void studentViewAvailableCourses() {
+    cout << "\nAvailable courses:\n";
+    for (size_t i = 0; i < courses.size(); ++i) {
+        cout << courses[i].id << " | " << courses[i].title << " | teacher: " << (courses[i].teacherUsername.empty() ? "(none)" : courses[i].teacherUsername) << '\n';
+    }
+}
+
+void studentEnroll(const string& studentUsername) {
+    string cid;
+    cout << "Enter Course ID to enroll: ";
+    getline(cin, cid);
+    Course* c = findCourse(cid);
+    if (!c) { cout << "Course not found.\n"; return; }
+    for (size_t i = 0; i < enrollments.size(); ++i) {
+        if (enrollments[i].first == studentUsername && enrollments[i].second == cid) { cout << "Already enrolled.\n"; return; }
+    }
+    enrollments.push_back(make_pair(studentUsername, cid));
+    saveEnrollments();
+    cout << "Enrolled in " << cid << '\n';
+}
+
+void studentViewMyCourses(const string& studentUsername) {
+    auto my = getStudentEnrollments(studentUsername);
+    if (my.empty()) { cout << "No enrollments.\n"; return; }
+    cout << "Your courses:\n";
+    for (size_t i = 0; i < my.size(); ++i) {
+        Course* c = findCourse(my[i]);
+        if (c) cout << c->id << " | " << c->title << " | teacher: " << (c->teacherUsername.empty() ? "(none)" : c->teacherUsername) << '\n';
+        else cout << my[i] << " (no longer exists)\n";
+    }
+}
+
+void studentSubmitAssignment(const string& studentUsername) {
+    string cid, content;
+    cout << "Course ID to submit assignment for: ";
+    getline(cin, cid);
+    bool enrolled = false;
+    for (size_t i = 0; i < enrollments.size(); ++i) {
+        if (enrollments[i].first == studentUsername && enrollments[i].second == cid) { enrolled = true; break; }
+    }
+    if (!enrolled) { cout << "You are not enrolled in that course.\n"; return; }
+    cout << "Enter submission text (single line): ";
+    getline(cin, content);
+    string fname = "submission_" + studentUsername + "_" + cid + ".txt";
+    ofstream ofs(fname.c_str(), ios::app);
+    ofs << content << '\n';
+    cout << "Submission saved to " << fname << '\n';
+}
+
+// Teacher operations
+void teacherViewMyCourses(const string& teacherUsername) {
+    cout << "Courses you teach:\n";
+    bool any = false;
+    for (size_t i = 0; i < courses.size(); ++i) {
+        if (courses[i].teacherUsername == teacherUsername) {
+            cout << courses[i].id << " | " << courses[i].title << '\n';
+            any = true;
+        }
+    }
+    if (!any) cout << "(none)\n";
+}
+
+void teacherViewEnrolledStudents(const string& teacherUsername) {
+    string cid;
+    cout << "Enter your Course ID: ";
+    getline(cin, cid);
+    Course* c = findCourse(cid);
+    if (!c) { cout << "Course not found.\n"; return; }
+    if (c->teacherUsername != teacherUsername) { cout << "You are not assigned to this course.\n"; return; }
+    cout << "Enrolled students in " << cid << ":\n";
+    bool any = false;
+    for (size_t i = 0; i < enrollments.size(); ++i) {
+        if (enrollments[i].second == cid) {
+            cout << "- " << enrollments[i].first;
+            StudentProfile* sp = findStudentProfile(enrollments[i].first);
+            if (sp) cout << " (" << sp->fullName << ")";
+            cout << '\n';
+            any = true;
+        }
+    }
+    if (!any) cout << "(none)\n";
+}
+
+void teacherUploadMaterial(const string& teacherUsername) {
+    string cid, text;
+    cout << "Course ID to upload material for: ";
+    getline(cin, cid);
+    Course* c = findCourse(cid);
+    if (!c) { cout << "Course not found.\n"; return; }
+    if (c->teacherUsername != teacherUsername) { cout << "You are not assigned to this course.\n"; return; }
+    cout << "Enter material text (single line): ";
+    getline(cin, text);
+    string fname = "material_" + cid + ".txt";
+    ofstream ofs(fname.c_str(), ios::app);
+    ofs << text << '\n';
+    cout << "Material appended to " << fname << '\n';
+}
+
+// Authentication
+UserRecord* authenticate() {
+    string uname, pwd;
+    cout << "Username: ";
+    getline(cin, uname);
+    cout << "Password: ";
+    getline(cin, pwd);
+    for (size_t i = 0; i < users.size(); ++i) {
+        if (users[i].username == uname && users[i].password == pwd) return &users[i];
+    }
+    return nullptr;
+}
+
+void ensureAdminExists() {
+    loadUsers();
+    bool hasAdmin = false;
+    for (size_t i = 0; i < users.size(); ++i) {
+        if (users[i].role == "admin") { hasAdmin = true; break; }
+    }
+    if (!hasAdmin) {
+        cout << "No admin account found. Creating default admin (username: admin, password: admin).\n";
+        UserRecord ur;
+        ur.username = "admin";
+        ur.password = "admin";
+        ur.role = "admin";
+        users.push_back(ur);
+        saveUsers();
+    }
+}
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
+    // load all records
+    loadUsers();
+    loadStudents();
+    loadCourses();
+    loadEnrollments();
+    ensureAdminExists();
+
+    cout << "Simple University LMS\n";
+
+    while (true) {
+        cout << "\n1) Login\n2) Exit\nSelect: ";
+        string choice;
+        getline(cin, choice);
+        if (choice == "2") break;
+        if (choice != "1") continue;
+
+        UserRecord* user = authenticate();
+        if (!user) { cout << "Invalid credentials.\n"; continue; }
+
+        if (user->role == "admin") {
+            while (true) {
+                cout << "\n--- Admin Menu ---\n";
+                cout << "1) Create user\n2) Delete user\n3) Add course\n4) Remove course\n5) Assign teacher to course\n6) View all records\n7) Logout\nSelect: ";
+                string cmd; getline(cin, cmd);
+                if (cmd == "7") break;
+                if (cmd == "1") adminCreateUser();
+                else if (cmd == "2") adminDeleteUser();
+                else if (cmd == "3") adminAddCourse();
+                else if (cmd == "4") adminRemoveCourse();
+                else if (cmd == "5") adminAssignTeacher();
+                else if (cmd == "6") adminViewAll();
+                else cout << "Unknown option.\n";
+            }
+        } else if (user->role == "student") {
+            while (true) {
+                cout << "\n--- Student Menu (" << user->username << ") ---\n";
+                cout << "1) View available courses\n2) Enroll in course\n3) View my courses\n4) Submit assignment\n5) Logout\nSelect: ";
+                string cmd; getline(cin, cmd);
+                if (cmd == "5") break;
+                if (cmd == "1") studentViewAvailableCourses();
+                else if (cmd == "2") studentEnroll(user->username);
+                else if (cmd == "3") studentViewMyCourses(user->username);
+                else if (cmd == "4") studentSubmitAssignment(user->username);
+                else cout << "Unknown option.\n";
+            }
+        } else if (user->role == "teacher") {
+            while (true) {
+                cout << "\n--- Teacher Menu (" << user->username << ") ---\n";
+                cout << "1) View my courses\n2) View enrolled students\n3) Upload material\n4) Logout\nSelect: ";
+                string cmd; getline(cin, cmd);
+                if (cmd == "4") break;
+                if (cmd == "1") teacherViewMyCourses(user->username);
+                else if (cmd == "2") teacherViewEnrolledStudents(user->username);
+                else if (cmd == "3") teacherUploadMaterial(user->username);
+                else cout << "Unknown option.\n";
+            }
+        } else {
+            cout << "Unknown role. Contact admin.\n";
+        }
+
+        // reload data in case files changed externally
+        loadUsers();
+        loadStudents();
+        loadCourses();
+        loadEnrollments();
+    }
+
+    cout << "Exiting LMS. Goodbye.\n";
+    return 0;
+}                                                                                                                                                                                                                   
