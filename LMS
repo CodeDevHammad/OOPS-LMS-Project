@@ -1,178 +1,116 @@
-#include <iostream>
-#include <fstream>
+#include <windows.h>
 #include <string>
 #include <vector>
+#include <fstream>
+#include <commctrl.h>
+#pragma comment(lib, "comctl32.lib")
 
 using namespace std;
 
+#define COLOR_PRIMARY RGB(41, 128, 185)
+#define COLOR_PRIMARY_DARK RGB(31, 97, 141)
+#define COLOR_ACCENT RGB(52, 152, 219)
+#define COLOR_SUCCESS RGB(39, 174, 96)
+#define COLOR_DANGER RGB(231, 76, 60)
+#define COLOR_WARNING RGB(243, 156, 18)
+#define COLOR_LIGHT RGB(236, 240, 241)
+#define COLOR_DARK RGB(44, 62, 80)
+#define COLOR_TEXT RGB(52, 73, 94)
+#define COLOR_BG RGB(255, 255, 255)
+
+HFONT hTitleFont = NULL;
+HFONT hHeaderFont = NULL;
+HFONT hNormalFont = NULL;
+HFONT hButtonFont = NULL;
 class User {
 protected:
-    string username;
-    string password;
-    string role;
-
+    string username, password, role;
 public:
-    User(string uname = "", string pwd = "", string r = "")
-        : username(uname), password(pwd), role(r) {
-    }
-
+    User(string u = "", string p = "", string r = "") : username(u), password(p), role(r) {}
     virtual ~User() {}
-
     string getUsername() const { return username; }
     string getPassword() const { return password; }
     string getRole() const { return role; }
-
-    void setPassword(string pwd) { password = pwd; }
-
-    virtual void displayMenu() = 0;
     virtual string getUserType() const = 0;
 };
 
 class Admin : public User {
 public:
-    Admin(string uname = "", string pwd = "")
-        : User(uname, pwd, "admin") {
-    }
-
-    void displayMenu() override {
-        cout << "\n--- Admin Menu ---\n";
-        cout << "1) Create user\n2) Delete user\n3) Add course\n4) Remove course\n";
-        cout << "5) Assign teacher to course\n6) View all records\n7) Logout\nSelect: ";
-    }
-
+    Admin(string u = "", string p = "") : User(u, p, "admin") {}
     string getUserType() const override { return "Administrator"; }
 };
 
 class Student : public User {
-private:
-    string fullName;
-    int age;
-
+    string fullName; int age;
 public:
-    Student(string uname = "", string pwd = "", string fname = "", int a = 0)
-        : User(uname, pwd, "student"), fullName(fname), age(a) {
-    }
-
+    Student(string u = "", string p = "", string n = "", int a = 0) : User(u, p, "student"), fullName(n), age(a) {}
     string getFullName() const { return fullName; }
     int getAge() const { return age; }
-    void setFullName(string fname) { fullName = fname; }
+    void setFullName(string n) { fullName = n; }
     void setAge(int a) { age = a; }
-
-    void displayMenu() override {
-        cout << "\n--- Student Menu (" << username << ") ---\n";
-        cout << "1) View available courses\n2) Enroll in course\n3) View my courses\n";
-        cout << "4) Submit assignment\n5) View course materials\n6) Logout\nSelect: ";
-    }
-
     string getUserType() const override { return "Student"; }
 };
 
 class Teacher : public User {
 public:
-    Teacher(string uname = "", string pwd = "")
-        : User(uname, pwd, "teacher") {
-    }
-
-    void displayMenu() override {
-        cout << "\n--- Teacher Menu (" << username << ") ---\n";
-        cout << "1) View my courses\n2) View enrolled students\n3) Upload material\n";
-        cout << "4) View student assignments\n5) Logout\nSelect: ";
-    }
-
+    Teacher(string u = "", string p = "") : User(u, p, "teacher") {}
     string getUserType() const override { return "Teacher"; }
 };
 
 class CourseInfo {
-private:
-    string courseId;
-    string title;
-    string teacherUsername;
-
+    string courseId, title, teacherUsername;
 public:
-    CourseInfo(string id = "", string t = "", string teacher = "")
-        : courseId(id), title(t), teacherUsername(teacher) {
-    }
-
+    CourseInfo(string id = "", string t = "", string tchr = "") : courseId(id), title(t), teacherUsername(tchr) {}
     string getId() const { return courseId; }
     string getTitle() const { return title; }
     string getTeacher() const { return teacherUsername; }
-
-    void setTitle(string t) { title = t; }
-    void setTeacher(string teacher) { teacherUsername = teacher; }
+    void setTeacher(string t) { teacherUsername = t; }
 };
 
 vector<User*> users;
 vector<CourseInfo> courses;
-vector<pair<string, string>> enrollments;
+vector<pair<string,string>> enrollments;
+User* currentUser = nullptr;
+HWND g_hMainWnd = NULL;
+HINSTANCE g_hInst = NULL;
 
 const string USERS_FILE = "users.txt";
 const string STUDENTS_FILE = "students.txt";
 const string COURSES_FILE = "courses.txt";
 const string ENROLLMENTS_FILE = "enrollments.txt";
 
-vector<string> splitLine(const string& line, char delim = '|') {
-    vector<string> parts;
-    string cur;
-    for (size_t i = 0; i < line.size(); ++i) {
-        if (line[i] == delim) {
-            parts.push_back(cur);
-            cur.clear();
-        }
-        else {
-            cur.push_back(line[i]);
-        }
-    }
-    parts.push_back(cur);
-    return parts;
+vector<string> split(const string& s, char d = '|') {
+    vector<string> r; string t;
+    for (char c : s) { if (c == d) { r.push_back(t); t.clear(); } else t += c; }
+    r.push_back(t); return r;
 }
 
-void ensureFileExists(const string& filename) {
-    ifstream ifs(filename.c_str());
-    if (!ifs.good()) {
-        ofstream ofs(filename.c_str());
-    }
-}
+void ensureFile(const string& f) { ifstream i(f); if (!i.good()) ofstream o(f); }
 
 void loadUsers() {
-    ensureFileExists(USERS_FILE);
-    for (size_t i = 0; i < users.size(); ++i) delete users[i];
+    for (auto u : users) delete u;
     users.clear();
-
-    ifstream ifs(USERS_FILE.c_str());
-    string line;
-    while (getline(ifs, line)) {
+    ensureFile(USERS_FILE);
+    ifstream f(USERS_FILE); string line;
+    while (getline(f, line)) {
         if (line.empty()) continue;
-        auto p = splitLine(line);
+        auto p = split(line);
         if (p.size() >= 3) {
-            string uname = p[0], pwd = p[1], role = p[2];
-
-            if (role == "admin") {
-                users.push_back(new Admin(uname, pwd));
-            }
-            else if (role == "student") {
-                users.push_back(new Student(uname, pwd));
-            }
-            else if (role == "teacher") {
-                users.push_back(new Teacher(uname, pwd));
-            }
+            if (p[2] == "admin") users.push_back(new Admin(p[0], p[1]));
+            else if (p[2] == "student") users.push_back(new Student(p[0], p[1]));
+            else if (p[2] == "teacher") users.push_back(new Teacher(p[0], p[1]));
         }
     }
-
-    ensureFileExists(STUDENTS_FILE);
-    ifstream sifs(STUDENTS_FILE.c_str());
-    while (getline(sifs, line)) {
+    ensureFile(STUDENTS_FILE);
+    ifstream sf(STUDENTS_FILE);
+    while (getline(sf, line)) {
         if (line.empty()) continue;
-        auto p = splitLine(line);
+        auto p = split(line);
         if (p.size() >= 3) {
-            string uname = p[0];
-            for (size_t i = 0; i < users.size(); ++i) {
-                if (users[i]->getUsername() == uname && users[i]->getRole() == "student") {
-                    Student* s = dynamic_cast<Student*>(users[i]);
-                    if (s) {
-                        s->setFullName(p[1]);
-                        try { s->setAge(stoi(p[2])); }
-                        catch (...) { s->setAge(0); }
-                    }
+            for (auto u : users) {
+                if (u->getUsername() == p[0] && u->getRole() == "student") {
+                    Student* s = dynamic_cast<Student*>(u);
+                    if (s) { s->setFullName(p[1]); try { s->setAge(stoi(p[2])); } catch(...) {} }
                     break;
                 }
             }
@@ -181,547 +119,1023 @@ void loadUsers() {
 }
 
 void saveUsers() {
-    ofstream ofs(USERS_FILE.c_str(), ios::trunc);
-    ofstream sofs(STUDENTS_FILE.c_str(), ios::trunc);
-
-    for (size_t i = 0; i < users.size(); ++i) {
-        ofs << users[i]->getUsername() << '|' << users[i]->getPassword() << '|' << users[i]->getRole() << '\n';
-
-        if (users[i]->getRole() == "student") {
-            Student* s = dynamic_cast<Student*>(users[i]);
-            if (s) {
-                sofs << s->getUsername() << '|' << s->getFullName() << '|' << s->getAge() << '\n';
-            }
+    ofstream f(USERS_FILE), sf(STUDENTS_FILE);
+    for (auto u : users) {
+        f << u->getUsername() << '|' << u->getPassword() << '|' << u->getRole() << '\n';
+        if (u->getRole() == "student") {
+            Student* s = dynamic_cast<Student*>(u);
+            if (s) sf << s->getUsername() << '|' << s->getFullName() << '|' << s->getAge() << '\n';
         }
     }
 }
 
 void loadCourses() {
-    ensureFileExists(COURSES_FILE);
-    courses.clear();
-    ifstream ifs(COURSES_FILE.c_str());
-    string line;
-    while (getline(ifs, line)) {
+    courses.clear(); ensureFile(COURSES_FILE);
+    ifstream f(COURSES_FILE); string line;
+    while (getline(f, line)) {
         if (line.empty()) continue;
-        auto p = splitLine(line);
-        if (p.size() >= 3) {
-            courses.push_back(CourseInfo(p[0], p[1], p[2]));
-        }
+        auto p = split(line);
+        if (p.size() >= 3) courses.push_back(CourseInfo(p[0], p[1], p[2]));
     }
 }
 
 void saveCourses() {
-    ofstream ofs(COURSES_FILE.c_str(), ios::trunc);
-    for (size_t i = 0; i < courses.size(); ++i) {
-        ofs << courses[i].getId() << '|' << courses[i].getTitle() << '|' << courses[i].getTeacher() << '\n';
-    }
+    ofstream f(COURSES_FILE);
+    for (auto& c : courses) f << c.getId() << '|' << c.getTitle() << '|' << c.getTeacher() << '\n';
 }
 
 void loadEnrollments() {
-    ensureFileExists(ENROLLMENTS_FILE);
-    enrollments.clear();
-    ifstream ifs(ENROLLMENTS_FILE.c_str());
-    string line;
-    while (getline(ifs, line)) {
+    enrollments.clear(); ensureFile(ENROLLMENTS_FILE);
+    ifstream f(ENROLLMENTS_FILE); string line;
+    while (getline(f, line)) {
         if (line.empty()) continue;
-        auto p = splitLine(line);
-        if (p.size() >= 2) {
-            enrollments.push_back(make_pair(p[0], p[1]));
-        }
+        auto p = split(line);
+        if (p.size() >= 2) enrollments.push_back({p[0], p[1]});
     }
 }
 
 void saveEnrollments() {
-    ofstream ofs(ENROLLMENTS_FILE.c_str(), ios::trunc);
-    for (size_t i = 0; i < enrollments.size(); ++i) {
-        ofs << enrollments[i].first << '|' << enrollments[i].second << '\n';
-    }
+    ofstream f(ENROLLMENTS_FILE);
+    for (auto& e : enrollments) f << e.first << '|' << e.second << '\n';
 }
 
-bool usernameExists(const string& uname) {
-    for (size_t i = 0; i < users.size(); ++i) {
-        if (users[i]->getUsername() == uname) return true;
-    }
-    return false;
-}
-
-User* findUser(const string& uname) {
-    for (size_t i = 0; i < users.size(); ++i) {
-        if (users[i]->getUsername() == uname) return users[i];
-    }
+bool userExists(const string& u) { for (auto* user : users) if (user->getUsername() == u) return true; return false; }
+CourseInfo* findCourse(const string& id) { for (auto& c : courses) if (c.getId() == id) return &c; return nullptr; }
+Student* findStudent(const string& u) {
+    for (auto* user : users) if (user->getUsername() == u && user->getRole() == "student") return dynamic_cast<Student*>(user);
     return nullptr;
 }
 
-Student* findStudentProfile(const string& uname) {
-    for (size_t i = 0; i < users.size(); ++i) {
-        if (users[i]->getUsername() == uname && users[i]->getRole() == "student") {
-            return dynamic_cast<Student*>(users[i]);
+void ensureAdmin() {
+    bool has = false;
+    for (auto u : users) if (u->getRole() == "admin") { has = true; break; }
+    if (!has) { users.push_back(new Admin("admin", "admin")); saveUsers(); }
+}
+
+string GetText(HWND h) {
+    int len = GetWindowTextLength(h);
+    if (!len) return "";
+    char* buf = new char[len + 1];
+    GetWindowTextA(h, buf, len + 1);
+    string r(buf);
+    delete[] buf;
+    return r;
+}
+
+void Msg(string m) { MessageBoxA(g_hMainWnd, m.c_str(), "LMS", MB_OK | MB_ICONINFORMATION); }
+void Err(string m) { MessageBoxA(g_hMainWnd, m.c_str(), "Error", MB_OK | MB_ICONERROR); }
+
+void InitFonts() {
+    hTitleFont = CreateFont(32, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
+    hHeaderFont = CreateFont(20, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
+    hNormalFont = CreateFont(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
+    hButtonFont = CreateFont(15, 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, "Segoe UI");
+}
+
+void DrawRoundedRect(HDC hdc, RECT rect, int radius, COLORREF fill, COLORREF border) {
+    HPEN hPen = CreatePen(PS_SOLID, 1, border);
+    HBRUSH hBrush = CreateSolidBrush(fill);
+    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+    HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrush);
+    
+    RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
+    
+    SelectObject(hdc, hOldPen);
+    SelectObject(hdc, hOldBrush);
+    DeleteObject(hPen);
+    DeleteObject(hBrush);
+}
+
+void DrawGradient(HDC hdc, RECT rect, COLORREF color1, COLORREF color2) {
+    int height = rect.bottom - rect.top;
+    for (int i = 0; i < height; i++) {
+        int r = GetRValue(color1) + (GetRValue(color2) - GetRValue(color1)) * i / height;
+        int g = GetGValue(color1) + (GetGValue(color2) - GetGValue(color1)) * i / height;
+        int b = GetBValue(color1) + (GetBValue(color2) - GetBValue(color1)) * i / height;
+        
+        HPEN hPen = CreatePen(PS_SOLID, 1, RGB(r, g, b));
+        HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+        MoveToEx(hdc, rect.left, rect.top + i, NULL);
+        LineTo(hdc, rect.right, rect.top + i);
+        SelectObject(hdc, hOldPen);
+        DeleteObject(hPen);
+    }
+}
+
+struct InputData { string prompt; string result; bool done; HWND hEdit; };
+
+LRESULT CALLBACK InputProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    InputData* data = (InputData*)GetWindowLongPtr(h, GWLP_USERDATA);
+    
+    switch(m) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(h, &ps);
+            RECT r;
+            GetClientRect(h, &r);
+            
+            
+            RECT header = {0, 0, r.right, 60};
+            DrawGradient(hdc, header, COLOR_PRIMARY, COLOR_PRIMARY_DARK);
+            
+            
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(255, 255, 255));
+            SelectObject(hdc, hHeaderFont);
+            char title[256];
+            GetWindowTextA(h, title, 256);
+            RECT titleRect = {15, 18, r.right - 15, 50};
+            DrawTextA(hdc, title, -1, &titleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            
+            EndPaint(h, &ps);
+            return 0;
         }
+        case WM_CTLCOLORSTATIC: {
+            HDC hdcStatic = (HDC)w;
+            SetTextColor(hdcStatic, COLOR_TEXT);
+            SetBkMode(hdcStatic, TRANSPARENT);
+            return (LRESULT)GetStockObject(NULL_BRUSH);
+        }
+        case WM_COMMAND:
+            if (LOWORD(w) == 1) {
+                if (data) {
+                    data->result = GetText(data->hEdit);
+                    data->done = true;
+                    DestroyWindow(h);
+                }
+                return 0;
+            }
+            if (LOWORD(w) == 2) {
+                if (data) { data->result = ""; data->done = true; }
+                DestroyWindow(h);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            if (data) { data->result = ""; data->done = true; }
+            DestroyWindow(h);
+            return 0;
     }
-    return nullptr;
+    return DefWindowProc(h, m, w, l);
 }
 
-CourseInfo* findCourse(const string& cid) {
-    for (size_t i = 0; i < courses.size(); ++i) {
-        if (courses[i].getId() == cid) return &courses[i];
+string Input(string prompt, string title = "Input") {
+    InputData data;
+    data.prompt = prompt;
+    data.result = "";
+    data.done = false;
+    
+    HWND h = CreateWindowExA(WS_EX_DLGMODALFRAME | WS_EX_TOPMOST, "InputBox", title.c_str(),
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, 0, 0, 450, 200, g_hMainWnd, NULL, g_hInst, NULL);
+    
+    SetWindowLongPtr(h, GWLP_USERDATA, (LONG_PTR)&data);
+    
+    RECT r; GetWindowRect(h, &r);
+    SetWindowPos(h, NULL, (GetSystemMetrics(SM_CXSCREEN) - (r.right - r.left)) / 2,
+        (GetSystemMetrics(SM_CYSCREEN) - (r.bottom - r.top)) / 2, 0, 0, SWP_NOSIZE);
+    
+    HWND hLabel = CreateWindowA("Static", prompt.c_str(), WS_CHILD | WS_VISIBLE, 
+        20, 75, 410, 20, h, NULL, g_hInst, NULL);
+    SendMessage(hLabel, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+    
+    data.hEdit = CreateWindowExA(WS_EX_CLIENTEDGE, "Edit", "", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+        20, 100, 410, 28, h, NULL, g_hInst, NULL);
+    SendMessage(data.hEdit, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+    
+    HWND hOK = CreateWindowA("Button", "OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+        230, 140, 95, 32, h, (HMENU)1, g_hInst, NULL);
+    SendMessage(hOK, WM_SETFONT, (WPARAM)hButtonFont, TRUE);
+    
+    HWND hCancel = CreateWindowA("Button", "Cancel", WS_CHILD | WS_VISIBLE,
+        335, 140, 95, 32, h, (HMENU)2, g_hInst, NULL);
+    SendMessage(hCancel, WM_SETFONT, (WPARAM)hButtonFont, TRUE);
+    
+    if (g_hMainWnd) EnableWindow(g_hMainWnd, FALSE);
+    SetFocus(data.hEdit);
+    
+    MSG msg;
+    while (!data.done && GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
-    return nullptr;
+    
+    if (g_hMainWnd) { EnableWindow(g_hMainWnd, TRUE); SetForegroundWindow(g_hMainWnd); }
+    return data.result;
 }
 
-vector<string> getStudentEnrollments(const string& studentUsername) {
-    vector<string> out;
-    for (size_t i = 0; i < enrollments.size(); ++i) {
-        if (enrollments[i].first == studentUsername) out.push_back(enrollments[i].second);
+struct RoleData { int selectedRole; bool done; };
+
+LRESULT CALLBACK RoleProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    RoleData* data = (RoleData*)GetWindowLongPtr(h, GWLP_USERDATA);
+    
+    switch(m) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(h, &ps);
+            RECT r;
+            GetClientRect(h, &r);
+            
+            
+            HBRUSH bgBrush = CreateSolidBrush(COLOR_LIGHT);
+            FillRect(hdc, &r, bgBrush);
+            DeleteObject(bgBrush);
+            
+            
+            RECT header = {0, 0, r.right, 70};
+            DrawGradient(hdc, header, COLOR_PRIMARY, COLOR_PRIMARY_DARK);
+            
+            
+            RECT accent = {0, 70, r.right, 78};
+            HBRUSH accentBrush = CreateSolidBrush(COLOR_ACCENT);
+            FillRect(hdc, &accent, accentBrush);
+            DeleteObject(accentBrush);
+            
+            
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(255, 255, 255));
+            SelectObject(hdc, hHeaderFont);
+            RECT titleRect = {20, 20, r.right - 20, 60};
+            DrawTextA(hdc, "Select User Role", -1, &titleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            
+            
+            SetTextColor(hdc, COLOR_TEXT);
+            SelectObject(hdc, hNormalFont);
+            RECT instrRect = {30, 95, r.right - 30, 125};
+            DrawTextA(hdc, "Choose the role for the new user:", -1, &instrRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            
+            EndPaint(h, &ps);
+            return 0;
+        }
+        case WM_CTLCOLORSTATIC: {
+            HDC hdcStatic = (HDC)w;
+            SetTextColor(hdcStatic, COLOR_TEXT);
+            SetBkMode(hdcStatic, TRANSPARENT);
+            return (LRESULT)GetStockObject(NULL_BRUSH);
+        }
+        case WM_COMMAND: {
+            int id = LOWORD(w);
+            if (data && (id >= 1 && id <= 3)) {
+                data->selectedRole = id;
+                data->done = true;
+                DestroyWindow(h);
+            } else if (id == 4) {
+                if (data) {
+                    data->selectedRole = -1;
+                    data->done = true;
+                }
+                DestroyWindow(h);
+            }
+            return 0;
+        }
+        case WM_CLOSE:
+            if (data) {
+                data->selectedRole = -1;
+                data->done = true;
+            }
+            DestroyWindow(h);
+            return 0;
     }
-    return out;
+    return DefWindowProc(h, m, w, l);
 }
 
-void adminCreateUser() {
-    string uname, pwd, role;
-    cout << "Enter new username: ";
-    getline(cin, uname);
-    if (uname.empty()) { cout << "Username cannot be empty.\n"; return; }
-    if (usernameExists(uname)) { cout << "Username already exists.\n"; return; }
-    cout << "Enter password: ";
-    getline(cin, pwd);
-    cout << "Enter role (admin/student/teacher): ";
-    getline(cin, role);
-    if (role != "admin" && role != "student" && role != "teacher") {
-        cout << "Invalid role.\n"; return;
+int SelectRole() {
+    RoleData data;
+    data.selectedRole = -1;
+    data.done = false;
+    
+    HWND h = CreateWindowExA(WS_EX_DLGMODALFRAME | WS_EX_TOPMOST, "RoleBox", "Select Role",
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, 0, 0, 480, 320, g_hMainWnd, NULL, g_hInst, NULL);
+    
+    SetWindowLongPtr(h, GWLP_USERDATA, (LONG_PTR)&data);
+    
+    RECT r; GetWindowRect(h, &r);
+    SetWindowPos(h, NULL, (GetSystemMetrics(SM_CXSCREEN) - (r.right - r.left)) / 2,
+        (GetSystemMetrics(SM_CYSCREEN) - (r.bottom - r.top)) / 2, 0, 0, SWP_NOSIZE);
+    
+    
+    HWND hAdmin = CreateWindowA("Button", "Administrator", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        40, 140, 130, 45, h, (HMENU)1, g_hInst, NULL);
+    SendMessage(hAdmin, WM_SETFONT, (WPARAM)hButtonFont, TRUE);
+    
+    
+    HWND hTeacher = CreateWindowA("Button", "Teacher", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        180, 140, 130, 45, h, (HMENU)2, g_hInst, NULL);
+    SendMessage(hTeacher, WM_SETFONT, (WPARAM)hButtonFont, TRUE);
+    
+    
+    HWND hStudent = CreateWindowA("Button", "Student", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+        320, 140, 130, 45, h, (HMENU)3, g_hInst, NULL);
+    SendMessage(hStudent, WM_SETFONT, (WPARAM)hButtonFont, TRUE);
+    
+    
+    HWND hDesc1 = CreateWindowA("Static", "Full system access", WS_CHILD | WS_VISIBLE | SS_CENTER,
+        40, 190, 130, 20, h, NULL, g_hInst, NULL);
+    SendMessage(hDesc1, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+    
+    HWND hDesc2 = CreateWindowA("Static", "Course management", WS_CHILD | WS_VISIBLE | SS_CENTER,
+        180, 190, 130, 20, h, NULL, g_hInst, NULL);
+    SendMessage(hDesc2, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+    
+    HWND hDesc3 = CreateWindowA("Static", "Course enrollment", WS_CHILD | WS_VISIBLE | SS_CENTER,
+        320, 190, 130, 20, h, NULL, g_hInst, NULL);
+    SendMessage(hDesc3, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+    
+    
+    HWND hCancel = CreateWindowA("Button", "Cancel", WS_CHILD | WS_VISIBLE,
+        180, 235, 130, 35, h, (HMENU)4, g_hInst, NULL);
+    SendMessage(hCancel, WM_SETFONT, (WPARAM)hButtonFont, TRUE);
+    
+    if (g_hMainWnd) EnableWindow(g_hMainWnd, FALSE);
+    SetFocus(hStudent);
+    
+    MSG msg;
+    while (!data.done && GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
+    
+    if (g_hMainWnd) { EnableWindow(g_hMainWnd, TRUE); SetForegroundWindow(g_hMainWnd); }
+    return data.selectedRole;
+}
 
-    if (role == "admin") {
-        users.push_back(new Admin(uname, pwd));
+void CreateUser() {
+    string u = Input("Enter Username:", "Create User");
+    if (u.empty()) return;
+    if (userExists(u)) { Err("Username exists!"); return; }
+    
+    string p = Input("Enter Password:", "Create User");
+    if (p.empty()) p = "password";
+    
+    int r = SelectRole();
+    
+    if (r == -1) return;
+    
+    if (r == 3) {
+        string n = Input("Enter Full Name:", "Student");
+        string a = Input("Enter Age:", "Student");
+        int age = 0; try { age = stoi(a); } catch(...) {}
+        users.push_back(new Student(u, p, n, age));
+    } else if (r == 1) { 
+        users.push_back(new Admin(u, p));
+    } else if (r == 2) { 
+        users.push_back(new Teacher(u, p));
+    } else {
+        return; 
     }
-    else if (role == "teacher") {
-        users.push_back(new Teacher(uname, pwd));
-    }
-    else if (role == "student") {
-        string fname, ageStr;
-        cout << "Enter student full name: ";
-        getline(cin, fname);
-        cout << "Enter student age: ";
-        getline(cin, ageStr);
-        int age = 0;
-        try { age = stoi(ageStr); }
-        catch (...) { age = 0; }
-        users.push_back(new Student(uname, pwd, fname, age));
-    }
-
     saveUsers();
-    cout << "User created.\n";
+    Msg("User created!");
 }
 
-void adminDeleteUser() {
-    string uname;
-    cout << "Username to delete: ";
-    getline(cin, uname);
+void DeleteUser() {
+    string u = Input("Username to delete:", "Delete User");
+    if (u.empty()) return;
     bool found = false;
-
     for (size_t i = 0; i < users.size(); ) {
-        if (users[i]->getUsername() == uname) {
-            delete users[i];
-            users.erase(users.begin() + i);
-            found = true;
-        }
-        else {
-            ++i;
-        }
-    }
-    if (!found) { cout << "User not found.\n"; return; }
-
-    for (size_t i = 0; i < enrollments.size(); ) {
-        if (enrollments[i].first == uname) enrollments.erase(enrollments.begin() + i);
+        if (users[i]->getUsername() == u) { delete users[i]; users.erase(users.begin() + i); found = true; }
         else ++i;
     }
-
-    for (size_t i = 0; i < courses.size(); ++i) {
-        if (courses[i].getTeacher() == uname) courses[i].setTeacher("");
+    if (!found) { Err("Not found!"); return; }
+    for (size_t i = 0; i < enrollments.size(); ) {
+        if (enrollments[i].first == u) enrollments.erase(enrollments.begin() + i); else ++i;
     }
-
-    saveUsers();
-    saveEnrollments();
-    saveCourses();
-    cout << "User and related records removed.\n";
+    for (auto& c : courses) if (c.getTeacher() == u) c.setTeacher("");
+    saveUsers(); saveEnrollments(); saveCourses();
+    Msg("Deleted!");
 }
 
-void adminAddCourse() {
-    string cid, title, teacher;
-    cout << "Course ID: ";
-    getline(cin, cid);
-    if (cid.empty()) { cout << "Course ID cannot be empty.\n"; return; }
-    if (findCourse(cid)) { cout << "Course ID already exists.\n"; return; }
-    cout << "Course title: ";
-    getline(cin, title);
-    cout << "Assign teacher username (leave blank to assign later): ";
-    getline(cin, teacher);
-    if (!teacher.empty() && !usernameExists(teacher)) {
-        cout << "Teacher username does not exist. Course will be created without teacher.\n";
-        teacher.clear();
-    }
-    courses.push_back(CourseInfo(cid, title, teacher));
+void AddCourse() {
+    string id = Input("Course ID:", "Add Course");
+    if (id.empty()) return;
+    if (findCourse(id)) { Err("ID exists!"); return; }
+    string t = Input("Course Title:", "Add Course");
+    string tchr = Input("Teacher (optional):", "Add Course");
+    courses.push_back(CourseInfo(id, t, tchr));
     saveCourses();
-    cout << "Course added.\n";
+    Msg("Course added!");
 }
 
-void adminRemoveCourse() {
-    string cid;
-    cout << "Course ID to remove: ";
-    getline(cin, cid);
+void RemoveCourse() {
+    string id = Input("Course ID:", "Remove");
+    if (id.empty()) return;
     bool found = false;
     for (size_t i = 0; i < courses.size(); ) {
-        if (courses[i].getId() == cid) {
-            courses.erase(courses.begin() + i);
-            found = true;
+        if (courses[i].getId() == id) { courses.erase(courses.begin() + i); found = true; } else ++i;
+    }
+    if (!found) { Err("Not found!"); return; }
+    saveCourses();
+    Msg("Removed!");
+}
+
+void AssignTeacher() {
+    string id = Input("Course ID:", "Assign");
+    if (id.empty()) return;
+    auto* c = findCourse(id);
+    if (!c) { Err("Not found!"); return; }
+    string t = Input("Teacher username:", "Assign");
+    c->setTeacher(t);
+    saveCourses();
+    Msg("Assigned!");
+}
+
+struct ViewerData { string content; bool done; };
+
+LRESULT CALLBACK ViewerProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    static HWND hEdit = NULL;
+    ViewerData* data = (ViewerData*)GetWindowLongPtr(h, GWLP_USERDATA);
+    
+    switch(m) {
+        case WM_CREATE: {
+            
+            hEdit = CreateWindowExA(WS_EX_CLIENTEDGE, "Edit", "", 
+                WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+                20, 120, 0, 0, h, NULL, g_hInst, NULL);
+            SendMessage(hEdit, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+            return 0;
         }
-        else ++i;
-    }
-    if (!found) { cout << "Course not found.\n"; return; }
-
-    for (size_t i = 0; i < enrollments.size(); ) {
-        if (enrollments[i].second == cid) enrollments.erase(enrollments.begin() + i);
-        else ++i;
-    }
-
-    saveCourses();
-    saveEnrollments();
-    cout << "Course removed and related enrollments deleted.\n";
-}
-
-void adminAssignTeacher() {
-    string cid, teacher;
-    cout << "Course ID: ";
-    getline(cin, cid);
-    CourseInfo* c = findCourse(cid);
-    if (!c) { cout << "Course not found.\n"; return; }
-    cout << "Teacher username to assign (leave blank to unassign): ";
-    getline(cin, teacher);
-    if (!teacher.empty() && !usernameExists(teacher)) {
-        cout << "Teacher username does not exist.\n"; return;
-    }
-    c->setTeacher(teacher);
-    saveCourses();
-    cout << "Assignment updated.\n";
-}
-
-void adminViewAll() {
-    cout << "\n--- Users ---\n";
-    for (size_t i = 0; i < users.size(); ++i) {
-        cout << users[i]->getUsername() << " (" << users[i]->getUserType() << ")\n";
-    }
-    cout << "\n--- Students ---\n";
-    for (size_t i = 0; i < users.size(); ++i) {
-        if (users[i]->getRole() == "student") {
-            Student* s = dynamic_cast<Student*>(users[i]);
-            if (s) {
-                cout << s->getUsername() << " - " << s->getFullName() << " - age " << s->getAge() << '\n';
+        case WM_SIZE: {
+            RECT r;
+            GetClientRect(h, &r);
+            if (hEdit) {
+                SetWindowPos(hEdit, NULL, 20, 120, r.right - 40, r.bottom - 180, SWP_NOZORDER);
             }
+            return 0;
         }
-    }
-    cout << "\n--- Courses ---\n";
-    for (size_t i = 0; i < courses.size(); ++i) {
-        cout << courses[i].getId() << " | " << courses[i].getTitle() << " | teacher: "
-            << (courses[i].getTeacher().empty() ? "(none)" : courses[i].getTeacher()) << '\n';
-    }
-    cout << "\n--- Enrollments ---\n";
-    for (size_t i = 0; i < enrollments.size(); ++i) {
-        cout << enrollments[i].first << " -> " << enrollments[i].second << '\n';
-    }
-    cout << '\n';
-}
-
-void studentViewAvailableCourses() {
-    cout << "\nAvailable courses:\n";
-    for (size_t i = 0; i < courses.size(); ++i) {
-        cout << courses[i].getId() << " | " << courses[i].getTitle() << " | teacher: "
-            << (courses[i].getTeacher().empty() ? "(none)" : courses[i].getTeacher()) << '\n';
-    }
-}
-
-void studentEnroll(const string& studentUsername) {
-    string cid;
-    cout << "Enter Course ID to enroll: ";
-    getline(cin, cid);
-    CourseInfo* c = findCourse(cid);
-    if (!c) { cout << "Course not found.\n"; return; }
-    for (size_t i = 0; i < enrollments.size(); ++i) {
-        if (enrollments[i].first == studentUsername && enrollments[i].second == cid) {
-            cout << "Already enrolled.\n"; return;
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(h, &ps);
+            RECT r;
+            GetClientRect(h, &r);
+            
+            
+            HBRUSH bgBrush = CreateSolidBrush(COLOR_LIGHT);
+            FillRect(hdc, &r, bgBrush);
+            DeleteObject(bgBrush);
+            
+            
+            RECT header = {0, 0, r.right, 90};
+            DrawGradient(hdc, header, COLOR_PRIMARY, COLOR_PRIMARY_DARK);
+            
+            
+            RECT accent = {0, 90, r.right, 98};
+            HBRUSH accentBrush = CreateSolidBrush(COLOR_ACCENT);
+            FillRect(hdc, &accent, accentBrush);
+            DeleteObject(accentBrush);
+            
+            
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(255, 255, 255));
+            SelectObject(hdc, hTitleFont);
+            RECT titleRect = {30, 15, r.right - 30, 50};
+            DrawTextA(hdc, "System Overview", -1, &titleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            
+            
+            SelectObject(hdc, hNormalFont);
+            RECT subRect = {30, 55, r.right - 30, 80};
+            DrawTextA(hdc, "Users, Courses & Enrollments", -1, &subRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            
+            EndPaint(h, &ps);
+            return 0;
         }
-    }
-    enrollments.push_back(make_pair(studentUsername, cid));
-    saveEnrollments();
-    cout << "Enrolled in " << cid << '\n';
-}
-
-void studentViewMyCourses(const string& studentUsername) {
-    auto my = getStudentEnrollments(studentUsername);
-    if (my.empty()) { cout << "No enrollments.\n"; return; }
-    cout << "Your courses:\n";
-    for (size_t i = 0; i < my.size(); ++i) {
-        CourseInfo* c = findCourse(my[i]);
-        if (c) {
-            cout << c->getId() << " | " << c->getTitle() << " | teacher: "
-                << (c->getTeacher().empty() ? "(none)" : c->getTeacher()) << '\n';
+        case WM_CTLCOLOREDIT: {
+            HDC hdcEdit = (HDC)w;
+            SetTextColor(hdcEdit, COLOR_TEXT);
+            SetBkColor(hdcEdit, RGB(255, 255, 255));
+            return (LRESULT)GetStockObject(WHITE_BRUSH);
         }
-        else {
-            cout << my[i] << " (no longer exists)\n";
-        }
-    }
-}
-
-void studentSubmitAssignment(const string& studentUsername) {
-    string cid, content;
-    cout << "Course ID to submit assignment for: ";
-    getline(cin, cid);
-    bool enrolled = false;
-    for (size_t i = 0; i < enrollments.size(); ++i) {
-        if (enrollments[i].first == studentUsername && enrollments[i].second == cid) { enrolled = true; break; }
-    }
-    if (!enrolled) { cout << "You are not enrolled in that course.\n"; return; }
-    cout << "Enter submission text (single line): ";
-    getline(cin, content);
-    string fname = "submission_" + studentUsername + "_" + cid + ".txt";
-    ofstream ofs(fname.c_str(), ios::app);
-    ofs << content << '\n';
-    cout << "Submission saved to " << fname << '\n';
-}
-
-void studentViewMaterials(const string& studentUsername) {
-    string cid;
-    cout << "Enter Course ID to view materials: ";
-    getline(cin, cid);
-
-    bool enrolled = false;
-    for (size_t i = 0; i < enrollments.size(); ++i) {
-        if (enrollments[i].first == studentUsername && enrollments[i].second == cid) {
-            enrolled = true;
+        case WM_COMMAND:
+            if (LOWORD(w) == 1) {
+                if (data) data->done = true;
+                DestroyWindow(h);
+                return 0;
+            }
             break;
+        case WM_CLOSE:
+            if (data) data->done = true;
+            DestroyWindow(h);
+            return 0;
+    }
+    return DefWindowProc(h, m, w, l);
+}
+
+void ShowViewer(string title, string content) {
+    ViewerData data;
+    data.content = content;
+    data.done = false;
+    
+    HWND h = CreateWindowExA(WS_EX_DLGMODALFRAME | WS_EX_TOPMOST, "ViewerBox", title.c_str(),
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, 0, 0, 700, 600, g_hMainWnd, NULL, g_hInst, NULL);
+    
+    SetWindowLongPtr(h, GWLP_USERDATA, (LONG_PTR)&data);
+    
+    RECT r; GetWindowRect(h, &r);
+    SetWindowPos(h, NULL, (GetSystemMetrics(SM_CXSCREEN) - (r.right - r.left)) / 2,
+        (GetSystemMetrics(SM_CYSCREEN) - (r.bottom - r.top)) / 2, 0, 0, SWP_NOSIZE);
+    
+    
+    HWND hEdit = FindWindowExA(h, NULL, "Edit", NULL);
+    if (hEdit) {
+        SetWindowTextA(hEdit, content.c_str());
+    }
+    
+    
+    HWND hClose = CreateWindowA("Button", "Close", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+        300, 520, 100, 35, h, (HMENU)1, g_hInst, NULL);
+    SendMessage(hClose, WM_SETFONT, (WPARAM)hButtonFont, TRUE);
+    
+    if (g_hMainWnd) EnableWindow(g_hMainWnd, FALSE);
+    SetFocus(hClose);
+    
+    MSG msg;
+    while (!data.done && GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+    
+    if (g_hMainWnd) { EnableWindow(g_hMainWnd, TRUE); SetForegroundWindow(g_hMainWnd); }
+}
+
+void ViewAll() {
+    string s = "=======================================================\r\n";
+    s += "                       USERS                            \r\n";
+    s += "=======================================================\r\n\r\n";
+    
+    for (auto u : users) {
+        s += "  > " + u->getUsername() + " (" + u->getUserType() + ")\r\n";
+    }
+    
+    s += "\r\n\r\n=======================================================\r\n";
+    s += "                      COURSES                           \r\n";
+    s += "=======================================================\r\n\r\n";
+    
+    for (auto& c : courses) {
+        s += "  Course: " + c.getId() + " - " + c.getTitle();
+        if (!c.getTeacher().empty()) {
+            s += "\r\n  Teacher: " + c.getTeacher();
         }
+        s += "\r\n\r\n";
     }
-    if (!enrolled) {
-        cout << "You are not enrolled in this course.\n";
-        return;
+    
+    s += "\r\n=======================================================\r\n";
+    s += "                    ENROLLMENTS                         \r\n";
+    s += "=======================================================\r\n\r\n";
+    
+    for (auto& e : enrollments) {
+        s += "  * " + e.first + " -> " + e.second + "\r\n";
     }
-
-    string fname = "material_" + cid + ".txt";
-    ifstream ifs(fname.c_str());
-    if (!ifs.good()) {
-        cout << "No materials uploaded yet for this course.\n";
-        return;
+    
+    if (enrollments.empty()) {
+        s += "  No enrollments yet.\r\n";
     }
-
-    cout << "\n===== Course Materials for " << cid << " =====\n";
-    string line;
-    int lineNum = 1;
-    while (getline(ifs, line)) {
-        cout << lineNum++ << ". " << line << '\n';
-    }
-    cout << "==========================================\n";
+    
+    ShowViewer("System Overview", s);
 }
 
-void teacherViewMyCourses(const string& teacherUsername) {
-    cout << "Courses you teach:\n";
-    bool any = false;
-    for (size_t i = 0; i < courses.size(); ++i) {
-        if (courses[i].getTeacher() == teacherUsername) {
-            cout << courses[i].getId() << " | " << courses[i].getTitle() << '\n';
-            any = true;
+void ViewCourses() {
+    string s = "=======================================================\r\n";
+    s += "                 AVAILABLE COURSES                     \r\n";
+    s += "=======================================================\r\n\r\n";
+    
+    for (auto& c : courses) {
+        s += "  Course: " + c.getId() + " - " + c.getTitle();
+        if (!c.getTeacher().empty()) {
+            s += "\r\n  Instructor: " + c.getTeacher();
         }
+        s += "\r\n\r\n";
     }
-    if (!any) cout << "(none)\n";
+    
+    if (courses.empty()) {
+        s += "  No courses available.\r\n";
+    }
+    
+    ShowViewer("Course Catalog", s);
 }
 
-void teacherViewEnrolledStudents(const string& teacherUsername) {
-    string cid;
-    cout << "Enter your Course ID: ";
-    getline(cin, cid);
-    CourseInfo* c = findCourse(cid);
-    if (!c) { cout << "Course not found.\n"; return; }
-    if (c->getTeacher() != teacherUsername) {
-        cout << "You are not assigned to this course.\n"; return;
+void Enroll() {
+    string id = Input("Course ID:", "Enroll");
+    if (id.empty()) return;
+    if (!findCourse(id)) { Err("Not found!"); return; }
+    for (auto& e : enrollments) {
+        if (e.first == currentUser->getUsername() && e.second == id) { Err("Already enrolled!"); return; }
     }
-    cout << "Enrolled students in " << cid << ":\n";
-    bool any = false;
-    for (size_t i = 0; i < enrollments.size(); ++i) {
-        if (enrollments[i].second == cid) {
-            cout << "- " << enrollments[i].first;
-            Student* sp = findStudentProfile(enrollments[i].first);
-            if (sp) cout << " (" << sp->getFullName() << ")";
-            cout << '\n';
-            any = true;
-        }
-    }
-    if (!any) cout << "(none)\n";
+    enrollments.push_back({currentUser->getUsername(), id});
+    saveEnrollments();
+    Msg("Enrolled!");
 }
 
-void teacherUploadMaterial(const string& teacherUsername) {
-    string cid, text;
-    cout << "Course ID to upload material for: ";
-    getline(cin, cid);
-    CourseInfo* c = findCourse(cid);
-    if (!c) { cout << "Course not found.\n"; return; }
-    if (c->getTeacher() != teacherUsername) {
-        cout << "You are not assigned to this course.\n"; return;
-    }
-    cout << "Enter material text (single line): ";
-    getline(cin, text);
-    string fname = "material_" + cid + ".txt";
-    ofstream ofs(fname.c_str(), ios::app);
-    ofs << text << '\n';
-    cout << "Material appended to " << fname << '\n';
-}
-
-void teacherViewAssignments(const string& teacherUsername) {
-    string cid;
-    cout << "Enter your Course ID: ";
-    getline(cin, cid);
-
-    CourseInfo* c = findCourse(cid);
-    if (!c) {
-        cout << "Course not found.\n";
-        return;
-    }
-    if (c->getTeacher() != teacherUsername) {
-        cout << "You are not assigned to this course.\n";
-        return;
-    }
-
-    cout << "\n===== Student Assignments for " << cid << " =====\n";
-
-    bool foundAny = false;
-    for (size_t i = 0; i < enrollments.size(); ++i) {
-        if (enrollments[i].second == cid) {
-            string studentName = enrollments[i].first;
-            string fname = "submission_" + studentName + "_" + cid + ".txt";
-
-            ifstream ifs(fname.c_str());
-            if (ifs.good()) {
-                cout << "\n--- Student: " << studentName;
-                Student* sp = findStudentProfile(studentName);
-                if (sp) cout << " (" << sp->getFullName() << ")";
-                cout << " ---\n";
-
-                string line;
-                int lineNum = 1;
-                while (getline(ifs, line)) {
-                    cout << "  " << lineNum++ << ". " << line << '\n';
+void MyCourses() {
+    string s = "=======================================================\r\n";
+    s += "                   MY ENROLLMENTS                       \r\n";
+    s += "=======================================================\r\n\r\n";
+    
+    bool hasEnrollments = false;
+    for (auto& e : enrollments) {
+        if (e.first == currentUser->getUsername()) {
+            auto* c = findCourse(e.second);
+            if (c) {
+                s += "  * " + c->getId() + " - " + c->getTitle();
+                if (!c->getTeacher().empty()) {
+                    s += "\r\n    Instructor: " + c->getTeacher();
                 }
-                foundAny = true;
+                s += "\r\n\r\n";
+                hasEnrollments = true;
             }
         }
     }
-
-    if (!foundAny) {
-        cout << "No assignments submitted yet for this course.\n";
+    
+    if (!hasEnrollments) {
+        s += "  You are not enrolled in any courses yet.\r\n";
+        s += "  Use 'Student > Enroll' to join a course.\r\n";
     }
-    cout << "==========================================\n";
+    
+    ShowViewer("My Courses", s);
 }
 
-User* authenticate() {
-    string uname, pwd;
-    cout << "Username: ";
-    getline(cin, uname);
-    cout << "Password: ";
-    getline(cin, pwd);
-    for (size_t i = 0; i < users.size(); ++i) {
-        if (users[i]->getUsername() == uname && users[i]->getPassword() == pwd) {
-            return users[i];
+void SubmitAssignment() {
+    string id = Input("Course ID:", "Submit");
+    if (id.empty()) return;
+    string txt = Input("Assignment text:", "Submit");
+    if (txt.empty()) return;
+    ofstream f("submission_" + currentUser->getUsername() + "_" + id + ".txt", ios::app);
+    f << txt << "\n";
+    Msg("Submitted!");
+}
+
+void ViewMaterials() {
+    string id = Input("Course ID:", "Materials");
+    if (id.empty()) return;
+    ifstream f("material_" + id + ".txt");
+    if (!f.good()) { Msg("No materials."); return; }
+    string s = "=== MATERIALS ===\n\n", line;
+    while (getline(f, line)) s += line + "\n";
+    Msg(s);
+}
+
+void TeacherCourses() {
+    string s = "=== MY COURSES ===\n\n";
+    for (auto& c : courses) if (c.getTeacher() == currentUser->getUsername()) s += c.getId() + " - " + c.getTitle() + "\n";
+    Msg(s);
+}
+
+void ViewStudents() {
+    string id = Input("Course ID:", "Students");
+    if (id.empty()) return;
+    auto* c = findCourse(id);
+    if (!c || c->getTeacher() != currentUser->getUsername()) { Err("Not your course!"); return; }
+    string s = "=== STUDENTS ===\n\n";
+    for (auto& e : enrollments) if (e.second == id) s += e.first + "\n";
+    Msg(s);
+}
+
+void UploadMaterial() {
+    string id = Input("Course ID:", "Upload");
+    if (id.empty()) return;
+    auto* c = findCourse(id);
+    if (!c || c->getTeacher() != currentUser->getUsername()) { Err("Not your course!"); return; }
+    string txt = Input("Material text:", "Upload");
+    if (txt.empty()) return;
+    ofstream f("material_" + id + ".txt", ios::app);
+    f << txt << "\n";
+    Msg("Uploaded!");
+}
+
+void ViewAssignments() {
+    string id = Input("Course ID:", "Assignments");
+    if (id.empty()) return;
+    string s = "=== ASSIGNMENTS ===\n\n";
+    for (auto& e : enrollments) {
+        if (e.second == id) {
+            ifstream f("submission_" + e.first + "_" + id + ".txt");
+            if (f.good()) {
+                s += "--- " + e.first + " ---\n";
+                string line;
+                while (getline(f, line)) s += line + "\n";
+                s += "\n";
+            }
         }
     }
-    return nullptr;
+    Msg(s);
 }
 
-void ensureAdminExists() {
-    loadUsers();
-    bool hasAdmin = false;
-    for (size_t i = 0; i < users.size(); ++i) {
-        if (users[i]->getRole() == "admin") { hasAdmin = true; break; }
+LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch(m) {
+        case WM_CREATE: {
+            g_hMainWnd = h;
+            HMENU menu = CreateMenu(), file = CreateMenu();
+            AppendMenuA(file, MF_STRING, 9001, "Logout");
+            AppendMenuA(file, MF_STRING, 9002, "Exit");
+            AppendMenuA(menu, MF_POPUP, (UINT_PTR)file, "File");
+            
+            if (currentUser->getRole() == "admin") {
+                HMENU adm = CreateMenu();
+                AppendMenuA(adm, MF_STRING, 1001, "Create User");
+                AppendMenuA(adm, MF_STRING, 1002, "Delete User");
+                AppendMenuA(adm, MF_STRING, 1003, "Add Course");
+                AppendMenuA(adm, MF_STRING, 1004, "Remove Course");
+                AppendMenuA(adm, MF_STRING, 1005, "Assign Teacher");
+                AppendMenuA(adm, MF_STRING, 1006, "View All");
+                AppendMenuA(menu, MF_POPUP, (UINT_PTR)adm, "Admin");
+            } else if (currentUser->getRole() == "student") {
+                HMENU std = CreateMenu();
+                AppendMenuA(std, MF_STRING, 2001, "View Courses");
+                AppendMenuA(std, MF_STRING, 2002, "Enroll");
+                AppendMenuA(std, MF_STRING, 2003, "My Courses");
+                AppendMenuA(std, MF_STRING, 2004, "Submit Assignment");
+                AppendMenuA(std, MF_STRING, 2005, "View Materials");
+                AppendMenuA(menu, MF_POPUP, (UINT_PTR)std, "Student");
+            } else {
+                HMENU tch = CreateMenu();
+                AppendMenuA(tch, MF_STRING, 3001, "My Courses");
+                AppendMenuA(tch, MF_STRING, 3002, "View Students");
+                AppendMenuA(tch, MF_STRING, 3003, "Upload Material");
+                AppendMenuA(tch, MF_STRING, 3004, "View Assignments");
+                AppendMenuA(menu, MF_POPUP, (UINT_PTR)tch, "Teacher");
+            }
+            SetMenu(h, menu);
+            return 0;
+        }
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_COMMAND: {
+            int id = LOWORD(w);
+            if (id == 9001) { currentUser = nullptr; PostQuitMessage(0); }
+            if (id == 9002) { PostQuitMessage(1); }
+            if (id == 1001) CreateUser();
+            if (id == 1002) DeleteUser();
+            if (id == 1003) AddCourse();
+            if (id == 1004) RemoveCourse();
+            if (id == 1005) AssignTeacher();
+            if (id == 1006) ViewAll();
+            if (id == 2001) ViewCourses();
+            if (id == 2002) Enroll();
+            if (id == 2003) MyCourses();
+            if (id == 2004) SubmitAssignment();
+            if (id == 2005) ViewMaterials();
+            if (id == 3001) TeacherCourses();
+            if (id == 3002) ViewStudents();
+            if (id == 3003) UploadMaterial();
+            if (id == 3004) ViewAssignments();
+            return 0;
+        }
+        case WM_PAINT: {
+            PAINTSTRUCT ps; 
+            HDC hdc = BeginPaint(h, &ps);
+            RECT r; 
+            GetClientRect(h, &r);
+            
+            
+            HBRUSH hBrush = CreateSolidBrush(COLOR_LIGHT);
+            FillRect(hdc, &r, hBrush);
+            DeleteObject(hBrush);
+            
+            
+            RECT header = {0, 0, r.right, 120};
+            DrawGradient(hdc, header, COLOR_PRIMARY, COLOR_PRIMARY_DARK);
+            
+            
+            RECT accent = {0, 120, r.right, 128};
+            hBrush = CreateSolidBrush(COLOR_ACCENT);
+            FillRect(hdc, &accent, hBrush);
+            DeleteObject(hBrush);
+            
+            
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(255, 255, 255));
+            SelectObject(hdc, hTitleFont);
+            
+            string welcome = "Welcome, " + currentUser->getUsername();
+            RECT titleRect = {30, 25, r.right - 30, 65};
+            DrawTextA(hdc, welcome.c_str(), -1, &titleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            
+            
+            SelectObject(hdc, hNormalFont);
+            string role = "Role: " + currentUser->getUserType();
+            RECT roleRect = {30, 70, r.right - 30, 95};
+            DrawTextA(hdc, role.c_str(), -1, &roleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            
+            
+            RECT card = {40, 160, r.right - 40, r.bottom - 40};
+            DrawRoundedRect(hdc, card, 10, RGB(255, 255, 255), RGB(200, 200, 200));
+            
+            
+            SetTextColor(hdc, COLOR_TEXT);
+            SelectObject(hdc, hHeaderFont);
+            RECT cardTitle = {60, 180, r.right - 60, 210};
+            DrawTextA(hdc, "Dashboard", -1, &cardTitle, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            
+            
+            SelectObject(hdc, hNormalFont);
+            SetTextColor(hdc, RGB(100, 100, 100));
+            RECT instructions = {60, 220, r.right - 60, r.bottom - 60};
+            
+            string info = "Use the menu bar above to access available features.\n\n";
+            if (currentUser->getRole() == "admin") {
+                info += "Admin Features:\n"
+                       "  - Create and manage users\n"
+                       "  - Add and remove courses\n"
+                       "  - Assign teachers to courses\n"
+                       "  - View all system data";
+            } else if (currentUser->getRole() == "student") {
+                info += "Student Features:\n"
+                       "  - Browse available courses\n"
+                       "  - Enroll in courses\n"
+                       "  - Submit assignments\n"
+                       "  - View course materials";
+            } else {
+                info += "Teacher Features:\n"
+                       "  - View assigned courses\n"
+                       "  - Manage student enrollments\n"
+                       "  - Upload course materials\n"
+                       "  - Review student assignments";
+            }
+            
+            DrawTextA(hdc, info.c_str(), -1, &instructions, DT_LEFT | DT_TOP | DT_WORDBREAK);
+            
+            EndPaint(h, &ps);
+            return 0;
+        }
+        case WM_CLOSE:
+            currentUser = nullptr;
+            DestroyWindow(h);
+            return 0;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
     }
-    if (!hasAdmin) {
-        cout << "No admin account found. Creating default admin (username: admin, password: admin).\n";
-        users.push_back(new Admin("admin", "admin"));
-        saveUsers();
-    }
+    return DefWindowProc(h, m, w, l);
 }
 
-int main() {
-    loadUsers();
-    loadCourses();
-    loadEnrollments();
-    ensureAdminExists();
+LRESULT CALLBACK LoginProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    static HWND hU, hP;
+    switch(m) {
+        case WM_CREATE: {
+            
+            hU = CreateWindowExA(WS_EX_CLIENTEDGE, "Edit", "admin", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+                90, 145, 280, 32, h, NULL, g_hInst, NULL);
+            SendMessage(hU, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+            
+            hP = CreateWindowExA(WS_EX_CLIENTEDGE, "Edit", "admin", WS_CHILD | WS_VISIBLE | ES_PASSWORD | ES_AUTOHSCROLL,
+                90, 200, 280, 32, h, NULL, g_hInst, NULL);
+            SendMessage(hP, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+            
+            HWND hLabel1 = CreateWindowA("Static", "Username:", WS_CHILD | WS_VISIBLE, 
+                90, 125, 280, 18, h, NULL, g_hInst, NULL);
+            SendMessage(hLabel1, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+            
+            HWND hLabel2 = CreateWindowA("Static", "Password:", WS_CHILD | WS_VISIBLE, 
+                90, 180, 280, 18, h, NULL, g_hInst, NULL);
+            SendMessage(hLabel2, WM_SETFONT, (WPARAM)hNormalFont, TRUE);
+            
+            HWND hLogin = CreateWindowA("Button", "Login", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                90, 250, 130, 36, h, (HMENU)IDOK, g_hInst, NULL);
+            SendMessage(hLogin, WM_SETFONT, (WPARAM)hButtonFont, TRUE);
+            
+            HWND hExit = CreateWindowA("Button", "Exit", WS_CHILD | WS_VISIBLE,
+                240, 250, 130, 36, h, (HMENU)IDCANCEL, g_hInst, NULL);
+            SendMessage(hExit, WM_SETFONT, (WPARAM)hButtonFont, TRUE);
+            
+            SetFocus(hU);
+            return 0;
+        }
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(h, &ps);
+            RECT r;
+            GetClientRect(h, &r);
+            
+            
+            HBRUSH bgBrush = CreateSolidBrush(COLOR_LIGHT);
+            FillRect(hdc, &r, bgBrush);
+            DeleteObject(bgBrush);
+            
+            
+            RECT header = {0, 0, r.right, 100};
+            DrawGradient(hdc, header, COLOR_PRIMARY, COLOR_PRIMARY_DARK);
+            
+            
+            RECT accent = {0, 100, r.right, 108};
+            HBRUSH accentBrush = CreateSolidBrush(COLOR_ACCENT);
+            FillRect(hdc, &accent, accentBrush);
+            DeleteObject(accentBrush);
+            
+            
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(255, 255, 255));
+            SelectObject(hdc, hTitleFont);
+            RECT titleRect = {0, 20, r.right, 60};
+            DrawTextA(hdc, "UNIVERSITY LMS", -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            
+            
+            SelectObject(hdc, hNormalFont);
+            RECT subRect = {0, 65, r.right, 90};
+            DrawTextA(hdc, "Learning Management System", -1, &subRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            
+            EndPaint(h, &ps);
+            return 0;
+        }
+        case WM_CTLCOLORSTATIC: {
+            HDC hdcStatic = (HDC)w;
+            SetTextColor(hdcStatic, COLOR_TEXT);
+            SetBkColor(hdcStatic, COLOR_LIGHT);
+            return (LRESULT)CreateSolidBrush(COLOR_LIGHT);
+        }
+        case WM_COMMAND:
+            if (LOWORD(w) == IDOK) {
+                string u = GetText(hU), p = GetText(hP);
+                for (auto* user : users) {
+                    if (user->getUsername() == u && user->getPassword() == p) {
+                        currentUser = user;
+                        DestroyWindow(h);
+                        return 0;
+                    }
+                }
+                MessageBoxA(h, "Invalid username or password!", "Login Failed", MB_OK | MB_ICONERROR);
+                SetWindowTextA(hP, "");
+                SetFocus(hP);
+            } else if (LOWORD(w) == IDCANCEL) {
+                PostQuitMessage(1);
+            }
+            return 0;
+        case WM_CLOSE:
+            PostQuitMessage(1);
+            return 0;
+        case WM_DESTROY:
+            PostQuitMessage(currentUser ? 0 : 1);
+            return 0;
+    }
+    return DefWindowProc(h, m, w, l);
+}
 
-    cout << "OOP-based University LMS" << endl;
-    cout << "==========================" << endl;
-    cout << "Demonstrates 4 OOP Concepts:" << endl;
-    cout << "1. Encapsulation (private members + getters/setters)" << endl;
-    cout << "2. Inheritance (User -> Admin/Student/Teacher)" << endl;
-    cout << "3. Polymorphism (virtual functions + dynamic_cast)" << endl;
-    cout << "4. Abstraction (abstract base class)" << endl << endl;
-
+int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nShow) {
+    g_hInst = hInst;
+    
+    INITCOMMONCONTROLSEX icc;
+    icc.dwSize = sizeof(icc);
+    icc.dwICC = ICC_WIN95_CLASSES;
+    InitCommonControlsEx(&icc);
+    
+    InitFonts();
+    
+    loadUsers(); loadCourses(); loadEnrollments(); ensureAdmin();
+    
+    WNDCLASSA wc = {0};
+    wc.lpfnWndProc = LoginProc; 
+    wc.hInstance = hInst; 
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); 
+    wc.lpszClassName = "Login";
+    RegisterClassA(&wc);
+    
+    wc.lpfnWndProc = MainProc; 
+    wc.hbrBackground = NULL;
+    wc.lpszClassName = "Main";
+    RegisterClassA(&wc);
+    
+    wc.lpfnWndProc = InputProc;
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = "InputBox";
+    RegisterClassA(&wc);
+    
+    wc.lpfnWndProc = RoleProc;
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = "RoleBox";
+    RegisterClassA(&wc);
+    
+    wc.lpfnWndProc = ViewerProc;
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = "ViewerBox";
+    RegisterClassA(&wc);
+    
+    MSG msg;
     while (true) {
-        cout << "\n1) Login\n2) Exit\nSelect: " << flush;
-        string choice;
-        getline(cin, choice);
-        if (choice == "2") break;
-        if (choice != "1") continue;
-
-        User* user = authenticate();
-        if (!user) { cout << "Invalid credentials.\n"; continue; }
-
-        if (user->getRole() == "admin") {
-            while (true) {
-                user->displayMenu();
-                string cmd; getline(cin, cmd);
-                if (cmd == "7") break;
-                if (cmd == "1") adminCreateUser();
-                else if (cmd == "2") adminDeleteUser();
-                else if (cmd == "3") adminAddCourse();
-                else if (cmd == "4") adminRemoveCourse();
-                else if (cmd == "5") adminAssignTeacher();
-                else if (cmd == "6") adminViewAll();
-                else cout << "Unknown option.\n";
-            }
-        }
-        else if (user->getRole() == "student") {
-            while (true) {
-                user->displayMenu();
-                string cmd; getline(cin, cmd);
-                if (cmd == "6") break;
-                if (cmd == "1") studentViewAvailableCourses();
-                else if (cmd == "2") studentEnroll(user->getUsername());
-                else if (cmd == "3") studentViewMyCourses(user->getUsername());
-                else if (cmd == "4") studentSubmitAssignment(user->getUsername());
-                else if (cmd == "5") studentViewMaterials(user->getUsername());
-                else cout << "Unknown option.\n";
-            }
-        }
-        else if (user->getRole() == "teacher") {
-            while (true) {
-                user->displayMenu();
-                string cmd; getline(cin, cmd);
-                if (cmd == "5") break;
-                if (cmd == "1") teacherViewMyCourses(user->getUsername());
-                else if (cmd == "2") teacherViewEnrolledStudents(user->getUsername());
-                else if (cmd == "3") teacherUploadMaterial(user->getUsername());
-                else if (cmd == "4") teacherViewAssignments(user->getUsername());
-                else cout << "Unknown option.\n";
-            }
-        }
-        else {
-            cout << "Unknown role. Contact admin.\n";
-        }
-
-        loadUsers();
-        loadCourses();
-        loadEnrollments();
+        currentUser = nullptr;
+        HWND hLogin = CreateWindowExA(0, "Login", "LMS Login", 
+            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+            0, 0, 460, 350, NULL, NULL, hInst, NULL);
+        RECT r; GetWindowRect(hLogin, &r);
+        SetWindowPos(hLogin, NULL, (GetSystemMetrics(SM_CXSCREEN) - (r.right - r.left)) / 2,
+            (GetSystemMetrics(SM_CYSCREEN) - (r.bottom - r.top)) / 2, 0, 0, SWP_NOSIZE);
+        
+        while (GetMessage(&msg, NULL, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }
+        if (!currentUser || msg.wParam != 0) break;
+        
+        g_hMainWnd = CreateWindowExA(0, "Main", "University LMS - Learning Management System", 
+            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            CW_USEDEFAULT, CW_USEDEFAULT, 900, 650, NULL, NULL, hInst, NULL);
+        
+        while (GetMessage(&msg, NULL, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }
+        if (msg.wParam != 0) break;
+        loadUsers(); loadCourses(); loadEnrollments();
     }
-
-    for (size_t i = 0; i < users.size(); ++i) {
-        delete users[i];
-    }
-    users.clear();
-
-    cout << "Exiting LMS. Goodbye.\n";
+    
+    for (auto u : users) delete u;
+    if (hTitleFont) DeleteObject(hTitleFont);
+    if (hHeaderFont) DeleteObject(hHeaderFont);
+    if (hNormalFont) DeleteObject(hNormalFont);
+    if (hButtonFont) DeleteObject(hButtonFont);
+    
     return 0;
 }
